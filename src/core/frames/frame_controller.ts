@@ -4,20 +4,10 @@ import {
   FrameLoadingStyle,
   FrameElementObservedAttribute,
 } from "../../elements/frame_element"
-import { FetchMethod, FetchRequest, FetchRequestDelegate } from "../../http/fetch_request"
+import { FetchRequest, TurboFetchRequestErrorEvent } from "../../http/fetch_request"
 import { FetchResponse } from "../../http/fetch_response"
 import { AppearanceObserver, AppearanceObserverDelegate } from "../../observers/appearance_observer"
-import {
-  clearBusyState,
-  dispatch,
-  getAttribute,
-  parseHTMLDocument,
-  markAsBusy,
-  uuid,
-  getHistoryMethodForAction,
-  getVisitAction,
-} from "../../util"
-import { FormSubmission, FormSubmissionDelegate } from "../drive/form_submission"
+import { dispatch, getAttribute, parseHTMLDocument, uuid, getHistoryMethodForAction } from "../../util"
 import { Snapshot } from "../snapshot"
 import { ViewDelegate, ViewRenderOptions } from "../view"
 import { Locatable, getAction, expandURL, urlsAreEqual, locationIsVisitable } from "../url"
@@ -28,10 +18,9 @@ import { FormLinkClickObserver, FormLinkClickObserverDelegate } from "../../obse
 import { FrameRenderer } from "./frame_renderer"
 import { session } from "../index"
 import { Action } from "../types"
+import { FrameVisit, FrameVisitDelegate, FrameVisitOptions } from "./frame_visit"
 import { VisitOptions } from "../drive/visit"
 import { TurboBeforeFrameRenderEvent } from "../session"
-import { StreamMessage } from "../streams/stream_message"
-import { PageSnapshot } from "../drive/page_snapshot"
 
 type VisitFallback = (location: Response | Locatable, options: Partial<VisitOptions>) => Promise<void>
 export type TurboFrameMissingEvent = CustomEvent<{ response: Response; visit: VisitFallback }>
@@ -39,11 +28,10 @@ export type TurboFrameMissingEvent = CustomEvent<{ response: Response; visit: Vi
 export class FrameController
   implements
     AppearanceObserverDelegate<FrameElement>,
-    FetchRequestDelegate,
     FormSubmitObserverDelegate,
-    FormSubmissionDelegate,
     FrameElementDelegate,
     FormLinkClickObserverDelegate,
+    FrameVisitDelegate,
     LinkInterceptorDelegate,
     ViewDelegate<FrameElement, Snapshot<FrameElement>>
 {
@@ -53,18 +41,12 @@ export class FrameController
   readonly formLinkClickObserver: FormLinkClickObserver
   readonly linkInterceptor: LinkInterceptor
   readonly formSubmitObserver: FormSubmitObserver
-  formSubmission?: FormSubmission
-  fetchResponseLoaded = (_fetchResponse: FetchResponse) => {}
-  private currentFetchRequest: FetchRequest | null = null
-  private resolveVisitPromise = () => {}
+  frameVisit?: FrameVisit
   private connected = false
   private hasBeenLoaded = false
   private ignoredAttributes: Set<FrameElementObservedAttribute> = new Set()
-  private action: Action | null = null
   readonly restorationIdentifier: string
   private previousFrameElement?: FrameElement
-  private currentNavigationElement?: Element
-  pageSnapshot?: PageSnapshot
 
   constructor(element: FrameElement) {
     this.element = element
@@ -98,6 +80,11 @@ export class FrameController
       this.linkInterceptor.stop()
       this.formSubmitObserver.stop()
     }
+  }
+
+  visit(options: FrameVisitOptions): Promise<void> {
+    const frameVisit = new FrameVisit(this, this.element, options)
+    return frameVisit.start()
   }
 
   disabledChanged() {
@@ -145,14 +132,11 @@ export class FrameController
 
   private async loadSourceURL() {
     if (this.enabled && this.isActive && !this.complete && this.sourceURL) {
-      this.element.loaded = this.visit(expandURL(this.sourceURL))
-      this.appearanceObserver.stop()
-      await this.element.loaded
-      this.hasBeenLoaded = true
+      await this.visit({ url: this.sourceURL })
     }
   }
 
-  async loadResponse(fetchResponse: FetchResponse) {
+  async loadResponse(fetchResponse: FetchResponse, frameVisit: FrameVisit) {
     if (fetchResponse.redirected || (fetchResponse.succeeded && fetchResponse.isHTML)) {
       this.sourceURL = fetchResponse.response.url
     }
@@ -174,13 +158,13 @@ export class FrameController
             false
           )
           if (this.view.renderPromise) await this.view.renderPromise
-          this.changeHistory()
+          this.changeHistory(frameVisit.action)
 
           await this.view.render(renderer)
           this.complete = true
           session.frameRendered(fetchResponse, this.element)
           session.frameLoaded(this.element)
-          this.fetchResponseLoaded(fetchResponse)
+          this.proposeVisitIfNavigatedWithAction(frameVisit, fetchResponse)
         } else if (this.willHandleFrameMissingFromResponse(fetchResponse)) {
           console.warn(
             `A matching frame for #${this.element.id} was missing from the response, transforming into full-page Visit.`
@@ -191,16 +175,12 @@ export class FrameController
     } catch (error) {
       console.error(error)
       this.view.invalidate()
-    } finally {
-      this.fetchResponseLoaded = () => {}
     }
   }
 
   // Appearance observer delegate
 
-  elementAppearedInViewport(element: FrameElement) {
-    this.pageSnapshot = PageSnapshot.fromElement(element).clone()
-    this.proposeVisitIfNavigatedWithAction(element, element)
+  elementAppearedInViewport(_element: FrameElement) {
     this.loadSourceURL()
   }
 
@@ -232,78 +212,39 @@ export class FrameController
   }
 
   formSubmitted(element: HTMLFormElement, submitter?: HTMLElement) {
-    if (this.formSubmission) {
-      this.formSubmission.stop()
-    }
-
-    this.formSubmission = new FormSubmission(this, element, submitter)
-    const { fetchRequest } = this.formSubmission
-    this.prepareRequest(fetchRequest)
-    this.formSubmission.start()
+    const frame = this.findFrameElement(element, submitter)
+    frame.delegate.visit(FrameVisit.optionsForSubmit(element, submitter))
   }
 
-  // Fetch request delegate
+  // Frame visit delegate
 
-  prepareRequest(request: FetchRequest) {
-    request.headers["Turbo-Frame"] = this.id
-
-    if (this.currentNavigationElement?.hasAttribute("data-turbo-stream")) {
-      request.acceptResponseType(StreamMessage.contentType)
-    }
+  shouldVisit(_frameVisit: FrameVisit) {
+    return this.enabled && this.isActive
   }
 
-  requestStarted(_request: FetchRequest) {
-    markAsBusy(this.element)
+  visitStarted(frameVisit: FrameVisit) {
+    this.frameVisit?.stop()
+    this.frameVisit = frameVisit
   }
 
-  requestPreventedHandlingResponse(_request: FetchRequest, _response: FetchResponse) {
-    this.resolveVisitPromise()
+  async visitSucceededWithResponse(frameVisit: FrameVisit, response: FetchResponse) {
+    await this.loadResponse(response, frameVisit)
   }
 
-  async requestSucceededWithResponse(request: FetchRequest, response: FetchResponse) {
-    await this.loadResponse(response)
-    this.resolveVisitPromise()
+  async visitFailedWithResponse(frameVisit: FrameVisit, response: FetchResponse) {
+    await this.loadResponse(response, frameVisit)
   }
 
-  async requestFailedWithResponse(request: FetchRequest, response: FetchResponse) {
-    console.error(response)
-    await this.loadResponse(response)
-    this.resolveVisitPromise()
-  }
-
-  requestErrored(request: FetchRequest, error: Error) {
+  visitErrored(frameVisit: FrameVisit, request: FetchRequest, error: Error) {
     console.error(error)
-    this.resolveVisitPromise()
+    dispatch<TurboFetchRequestErrorEvent>("turbo:fetch-request-error", {
+      target: this.element,
+      detail: { request, error },
+    })
   }
 
-  requestFinished(_request: FetchRequest) {
-    clearBusyState(this.element)
-  }
-
-  // Form submission delegate
-
-  formSubmissionStarted({ formElement }: FormSubmission) {
-    markAsBusy(formElement, this.findFrameElement(formElement))
-  }
-
-  formSubmissionSucceededWithResponse(formSubmission: FormSubmission, response: FetchResponse) {
-    const frame = this.findFrameElement(formSubmission.formElement, formSubmission.submitter)
-
-    frame.delegate.proposeVisitIfNavigatedWithAction(frame, formSubmission.formElement, formSubmission.submitter)
-
-    frame.delegate.loadResponse(response)
-  }
-
-  formSubmissionFailedWithResponse(formSubmission: FormSubmission, fetchResponse: FetchResponse) {
-    this.element.delegate.loadResponse(fetchResponse)
-  }
-
-  formSubmissionErrored(formSubmission: FormSubmission, error: Error) {
-    console.error(error)
-  }
-
-  formSubmissionFinished({ formElement }: FormSubmission) {
-    clearBusyState(formElement, this.findFrameElement(formElement))
+  visitCompleted(_frameVisit: FrameVisit) {
+    this.hasBeenLoaded = true
   }
 
   // View delegate
@@ -351,64 +292,32 @@ export class FrameController
 
   // Private
 
-  private async visit(url: URL) {
-    const request = new FetchRequest(this, FetchMethod.get, url, new URLSearchParams(), this.element)
-
-    this.currentFetchRequest?.cancel()
-    this.currentFetchRequest = request
-
-    return new Promise<void>((resolve) => {
-      this.resolveVisitPromise = () => {
-        this.resolveVisitPromise = () => {}
-        this.currentFetchRequest = null
-        resolve()
-      }
-      request.perform()
-    })
+  private navigateFrame(element: Element, url: string) {
+    const frame = this.findFrameElement(element)
+    frame.delegate.visit(FrameVisit.optionsForClick(element, expandURL(url)))
   }
 
-  private navigateFrame(element: Element, url: string, submitter?: HTMLElement) {
-    const frame = this.findFrameElement(element, submitter)
-    this.pageSnapshot = PageSnapshot.fromElement(frame).clone()
-
-    frame.delegate.proposeVisitIfNavigatedWithAction(frame, element, submitter)
-
-    this.withCurrentNavigationElement(element, () => {
-      frame.src = url
-    })
-  }
-
-  proposeVisitIfNavigatedWithAction(frame: FrameElement, element: Element, submitter?: HTMLElement) {
-    this.action = getVisitAction(submitter, element, frame)
-
-    if (this.action) {
-      const { visitCachedSnapshot } = frame.delegate
-
-      frame.delegate.fetchResponseLoaded = (fetchResponse: FetchResponse) => {
-        if (frame.src) {
-          const { statusCode, redirected } = fetchResponse
-          const responseHTML = frame.ownerDocument.documentElement.outerHTML
-          const response = { statusCode, redirected, responseHTML }
-          const options: Partial<VisitOptions> = {
-            response,
-            visitCachedSnapshot,
-            willRender: false,
-            updateHistory: false,
-            restorationIdentifier: this.restorationIdentifier,
-            snapshot: this.pageSnapshot,
-          }
-
-          if (this.action) options.action = this.action
-
-          session.visit(frame.src, options)
-        }
+  private proposeVisitIfNavigatedWithAction({ action, element, snapshot }: FrameVisit, fetchResponse: FetchResponse) {
+    if (element.src && action) {
+      const { statusCode, redirected } = fetchResponse
+      const responseHTML = element.ownerDocument.documentElement.outerHTML
+      const options: Partial<VisitOptions> = {
+        action,
+        snapshot,
+        response: { statusCode, redirected, responseHTML },
+        restorationIdentifier: this.restorationIdentifier,
+        updateHistory: false,
+        visitCachedSnapshot: this.visitCachedSnapshot,
+        willRender: false,
       }
+
+      session.visit(element.src, options)
     }
   }
 
-  changeHistory() {
-    if (this.action) {
-      const method = getHistoryMethodForAction(this.action)
+  changeHistory(action: Action | null) {
+    if (action) {
+      const method = getHistoryMethodForAction(action)
       session.history.update(method, expandURL(this.element.src || ""), this.restorationIdentifier)
     }
   }
@@ -532,7 +441,7 @@ export class FrameController
   }
 
   get isLoading() {
-    return this.formSubmission !== undefined || this.resolveVisitPromise() !== undefined
+    return this.frameVisit !== undefined
   }
 
   get complete() {
@@ -567,12 +476,6 @@ export class FrameController
     this.ignoredAttributes.add(attributeName)
     callback()
     this.ignoredAttributes.delete(attributeName)
-  }
-
-  private withCurrentNavigationElement(element: Element, callback: () => void) {
-    this.currentNavigationElement = element
-    callback()
-    delete this.currentNavigationElement
   }
 }
 
