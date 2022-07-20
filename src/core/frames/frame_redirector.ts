@@ -1,15 +1,18 @@
 import { FormSubmitObserver, FormSubmitObserverDelegate } from "../../observers/form_submit_observer"
 import { FrameElement } from "../../elements/frame_element"
 import { LinkInterceptor, LinkInterceptorDelegate } from "./link_interceptor"
-import { expandURL, getAction, locationIsVisitable } from "../url"
+import { Session } from "../session"
+import { expandURL, getAction } from "../url"
 
 export class FrameRedirector implements LinkInterceptorDelegate, FormSubmitObserverDelegate {
   readonly element: Element
+  readonly session: Session
   readonly linkInterceptor: LinkInterceptor
   readonly formSubmitObserver: FormSubmitObserver
 
-  constructor(element: Element) {
+  constructor(element: Element, session: Session) {
     this.element = element
+    this.session = session
     this.linkInterceptor = new LinkInterceptor(this, element)
     this.formSubmitObserver = new FormSubmitObserver(this, element)
   }
@@ -55,7 +58,7 @@ export class FrameRedirector implements LinkInterceptorDelegate, FormSubmitObser
     const meta = this.element.ownerDocument.querySelector<HTMLMetaElement>(`meta[name="turbo-root"]`)
     const rootLocation = expandURL(meta?.content ?? "/")
 
-    return this.shouldRedirect(form, submitter) && locationIsVisitable(action, rootLocation)
+    return this.shouldRedirect(form, submitter) && this.session.locationIsVisitable(action, rootLocation)
   }
 
   private shouldRedirect(element: Element, submitter?: HTMLElement) {
