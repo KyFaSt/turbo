@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Tabs</title>
+    <script src="/dist/turbo.es2017-umd.js"></script>
+    <script src="/src/tests/fixtures/test.js"></script>
+  </head>
+  <body>
+    <h1>Tabs</h1>
+
+    <turbo-frame id="tab-frame-outer" data-turbo-action="advance" target="_top">
+      <div>
+        <a data-turbo-frame="tab-frame" id="bug-1" href="/src/tests/fixtures/bu.html">Tab 1</a>
+        <a data-turbo-frame="tab-frame" id="bug-2" href="/src/tests/fixtures/bug/two.html">Tab 2</a>
+        <a data-turbo-frame="tab-frame" id="bug-3" href="/src/tests/fixtures/bug/three.html">Tab 3</a>
+      </div>
+
+      <turbo-frame id="tab-frame" data-turbo-action="advance" target="_top">
+      <div id="tab-content">One</div>
+      </turbo-frame>
+    </turbo-frame>
+  </body>
+</html>
