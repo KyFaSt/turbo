@@ -1,5 +1,7 @@
 (function(eventNames) {
-  function serializeToChannel(object, returned = {}) {
+  function serializeToChannel(object, visited = new Set()) {
+    const returned = {}
+
     for (const key in object) {
       const value = object[key]
 
@@ -8,7 +10,13 @@
       } else if (value instanceof Element) {
         returned[key] = value.outerHTML
       } else if (typeof value == "object") {
-        returned[key] = serializeToChannel(value)
+        if (visited.has(value))  {
+          returned[key] = "skipped to prevent infinitely recursing"
+        } else {
+          visited.add(value)
+
+          returned[key] = serializeToChannel(value, visited)
+        }
       } else {
         returned[key] = value
       }
@@ -39,16 +47,21 @@
      }
    }).observe(document, { subtree: true, childList: true, attributes: true })
 })([
+  "turbo:before-stream-render",
   "turbo:before-cache",
   "turbo:before-render",
   "turbo:before-visit",
   "turbo:load",
   "turbo:render",
   "turbo:before-fetch-request",
+  "turbo:submit-start",
+  "turbo:submit-end",
   "turbo:before-fetch-response",
   "turbo:visit",
   "turbo:before-frame-render",
+  "turbo:fetch-request-error",
   "turbo:frame-load",
   "turbo:frame-render",
+  "turbo:frame-missing",
   "turbo:reload"
 ])

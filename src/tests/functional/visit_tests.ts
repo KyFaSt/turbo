@@ -1,7 +1,18 @@
 import { Page, test } from "@playwright/test"
 import { assert } from "chai"
 import { get } from "http"
-import { nextBeat, nextEventNamed, readEventLogs, visitAction, willChangeBody } from "../helpers/page"
+import {
+  getSearchParam,
+  isScrolledToSelector,
+  isScrolledToTop,
+  nextBeat,
+  nextEventNamed,
+  noNextAttributeMutationNamed,
+  readEventLogs,
+  scrollToSelector,
+  visitAction,
+  willChangeBody,
+} from "../helpers/page"
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/src/tests/fixtures/visit.html")
@@ -118,6 +129,23 @@ test("test turbo:before-fetch-response open new site", async ({ page }) => {
   assert.isTrue(fetchResponseResult.responseHTML.indexOf("An element with an ID") > -1)
 })
 
+test("test visits with data-turbo-stream include MIME type & search params", async ({ page }) => {
+  await page.click("#stream-link")
+  const { fetchOptions, url } = await nextEventNamed(page, "turbo:before-fetch-request")
+
+  assert.ok(fetchOptions.headers["Accept"].includes("text/vnd.turbo-stream.html"))
+  assert.equal(getSearchParam(url, "key"), "value")
+})
+
+test("test visits with data-turbo-stream do not set aria-busy", async ({ page }) => {
+  await page.click("#stream-link")
+
+  assert.ok(
+    await noNextAttributeMutationNamed(page, "html", "aria-busy"),
+    "never sets [aria-busy] on the document element"
+  )
+})
+
 test("test cache does not override response after redirect", async ({ page }) => {
   await page.evaluate(() => {
     const cachedElement = document.createElement("some-cached-element")
@@ -144,6 +172,44 @@ function contentTypeOfURL(url: string): Promise<string | undefined> {
     get(url, ({ headers }) => resolve(headers["content-type"]))
   })
 }
+
+test("test can scroll to element after click-initiated turbo:visit", async ({ page }) => {
+  const id = "below-the-fold-link"
+  await page.evaluate((id) => {
+    addEventListener("turbo:load", () => document.getElementById(id)?.scrollIntoView())
+  }, id)
+
+  assert(await isScrolledToTop(page), "starts unscrolled")
+
+  await page.click("#same-page-link")
+  await nextEventNamed(page, "turbo:load")
+
+  assert(await isScrolledToSelector(page, "#" + id), "scrolls after click-initiated turbo:load")
+})
+
+test("test can scroll to element after history-initiated turbo:visit", async ({ page }) => {
+  const id = "below-the-fold-link"
+  await page.evaluate((id) => {
+    addEventListener("turbo:load", () => document.getElementById(id)?.scrollIntoView())
+  }, id)
+
+  await scrollToSelector(page, "#" + id)
+  await page.click("#" + id)
+  await nextEventNamed(page, "turbo:load")
+  await page.goBack()
+  await nextEventNamed(page, "turbo:load")
+
+  assert(await isScrolledToSelector(page, "#" + id), "scrolls after history-initiated turbo:load")
+})
+
+test("test Visit with network error", async ({ page }) => {
+  await page.evaluate(() => {
+    addEventListener("turbo:fetch-request-error", (event: Event) => event.preventDefault())
+  })
+  await page.context().setOffline(true)
+  await page.click("#same-origin-link")
+  await nextEventNamed(page, "turbo:fetch-request-error")
+})
 
 async function visitLocation(page: Page, location: string) {
   return page.evaluate((location) => window.Turbo.visit(location), location)

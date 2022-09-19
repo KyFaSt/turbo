@@ -1,5 +1,5 @@
 import { Adapter } from "../native/adapter"
-import { FetchMethod, FetchRequest, FetchRequestDelegate } from "../../http/fetch_request"
+import { FetchMethod, FetchRequest, FetchRequestDelegate, FetchRequestHeaders } from "../../http/fetch_request"
 import { FetchResponse } from "../../http/fetch_response"
 import { History } from "./history"
 import { getAnchor } from "../url"
@@ -8,6 +8,7 @@ import { PageSnapshot } from "./page_snapshot"
 import { Action } from "../types"
 import { getHistoryMethodForAction, uuid } from "../../util"
 import { PageView } from "./page_view"
+import { StreamMessage } from "../streams/stream_message"
 
 export interface VisitDelegate {
   readonly adapter: Adapter
@@ -48,6 +49,8 @@ export type VisitOptions = {
   updateHistory: boolean
   restorationIdentifier?: string
   shouldCacheSnapshot: boolean
+  frame?: string
+  acceptsStreamResponse: boolean
 }
 
 const defaultOptions: VisitOptions = {
@@ -57,6 +60,7 @@ const defaultOptions: VisitOptions = {
   willRender: true,
   updateHistory: true,
   shouldCacheSnapshot: true,
+  acceptsStreamResponse: false,
 }
 
 export type VisitResponse = {
@@ -73,7 +77,7 @@ export enum SystemStatusCode {
 
 export class Visit implements FetchRequestDelegate {
   readonly delegate: VisitDelegate
-  readonly identifier = uuid()
+  readonly identifier = uuid() // Required by turbo-ios
   readonly restorationIdentifier: string
   readonly action: Action
   readonly referrer?: URL
@@ -92,6 +96,7 @@ export class Visit implements FetchRequestDelegate {
   response?: VisitResponse
   scrolled = false
   shouldCacheSnapshot = true
+  acceptsStreamResponse = false
   snapshotHTML?: string
   snapshotCached = false
   state = VisitState.initialized
@@ -116,6 +121,7 @@ export class Visit implements FetchRequestDelegate {
       willRender,
       updateHistory,
       shouldCacheSnapshot,
+      acceptsStreamResponse,
     } = {
       ...defaultOptions,
       ...options,
@@ -131,6 +137,7 @@ export class Visit implements FetchRequestDelegate {
     this.updateHistory = updateHistory
     this.scrolled = !willRender
     this.shouldCacheSnapshot = shouldCacheSnapshot
+    this.acceptsStreamResponse = acceptsStreamResponse
   }
 
   get adapter() {
@@ -248,6 +255,7 @@ export class Visit implements FetchRequestDelegate {
         if (this.view.renderPromise) await this.view.renderPromise
         if (isSuccessful(statusCode) && responseHTML != null) {
           await this.view.renderPage(PageSnapshot.fromHTMLString(responseHTML), false, this.willRender, this)
+          this.performScroll()
           this.adapter.visitRendered(this)
           this.complete()
         } else {
@@ -290,6 +298,7 @@ export class Visit implements FetchRequestDelegate {
         } else {
           if (this.view.renderPromise) await this.view.renderPromise
           await this.view.renderPage(snapshot, isPreview, this.willRender, this)
+          this.performScroll()
           this.adapter.visitRendered(this)
           if (!isPreview) {
             this.complete()
@@ -303,7 +312,6 @@ export class Visit implements FetchRequestDelegate {
     if (this.redirectedToLocation && !this.followedRedirect && this.response?.redirected) {
       this.adapter.visitProposedToLocation(this.redirectedToLocation, {
         action: "replace",
-        willRender: false,
         response: this.response,
       })
       this.followedRedirect = true
@@ -314,12 +322,19 @@ export class Visit implements FetchRequestDelegate {
     if (this.isSamePage) {
       this.render(async () => {
         this.cacheSnapshot()
+        this.performScroll()
         this.adapter.visitRendered(this)
       })
     }
   }
 
   // Fetch request delegate
+
+  prepareHeadersForRequest(headers: FetchRequestHeaders, request: FetchRequest) {
+    if (this.acceptsStreamResponse) {
+      request.acceptResponseType(StreamMessage.contentType)
+    }
+  }
 
   requestStarted() {
     this.startRequest()
@@ -368,7 +383,7 @@ export class Visit implements FetchRequestDelegate {
   // Scrolling
 
   performScroll() {
-    if (!this.scrolled) {
+    if (!this.scrolled && !this.view.forceReloaded) {
       if (this.action == "restore") {
         this.scrollToRestoredPosition() || this.scrollToAnchor() || this.view.scrollToTop()
       } else {
@@ -448,9 +463,6 @@ export class Visit implements FetchRequestDelegate {
     })
     await callback()
     delete this.frame
-    if (!this.view.forceReloaded) {
-      this.performScroll()
-    }
   }
 
   cancelRender() {

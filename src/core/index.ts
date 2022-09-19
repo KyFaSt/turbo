@@ -1,5 +1,5 @@
 import { Adapter } from "./native/adapter"
-import { Session } from "./session"
+import { FormMode, Session } from "./session"
 import { Cache } from "./cache"
 import { Locatable } from "./url"
 import { StreamMessage } from "./streams/stream_message"
@@ -19,6 +19,7 @@ export {
   TurboBeforeRenderEvent,
   TurboBeforeVisitEvent,
   TurboClickEvent,
+  TurboBeforeFrameRenderEvent,
   TurboFrameLoadEvent,
   TurboFrameRenderEvent,
   TurboLoadEvent,
@@ -27,10 +28,9 @@ export {
 } from "./session"
 
 export { TurboSubmitStartEvent, TurboSubmitEndEvent } from "./drive/form_submission"
-export { TurboBeforeFetchRequestEvent, TurboBeforeFetchResponseEvent } from "../http/fetch_request"
-export { TurboBeforeStreamRenderEvent } from "../elements/stream_element"
+export { TurboFrameMissingEvent } from "./frames/frame_controller"
 
-export { StreamActions } from "./streams/stream_actions"
+export { StreamActions, TurboStreamAction, TurboStreamActions } from "./streams/stream_actions"
 
 /**
  * Starts the main session.
@@ -123,10 +123,12 @@ export function setProgressBarDelay(delay: number) {
   session.setProgressBarDelay(delay)
 }
 
-export function setConfirmMethod(confirmMethod: (message: string, element: HTMLFormElement) => Promise<boolean>) {
+export function setConfirmMethod(
+  confirmMethod: (message: string, element: HTMLFormElement, submitter: HTMLElement | undefined) => Promise<boolean>
+) {
   FormSubmission.confirmMethod = confirmMethod
 }
 
-export function setFormMode(mode: string) {
+export function setFormMode(mode: FormMode) {
   session.setFormMode(mode)
 }

@@ -1,7 +1,9 @@
 import { StreamActions } from "../core/streams/stream_actions"
 import { nextAnimationFrame } from "../util"
 
-export type TurboBeforeStreamRenderEvent = CustomEvent
+type Render = (currentElement: StreamElement) => Promise<void>
+
+export type TurboBeforeStreamRenderEvent = CustomEvent<{ newStream: StreamElement; render: Render }>
 
 // <turbo-stream action=replace target=id><template>...
 
@@ -26,6 +28,10 @@ export type TurboBeforeStreamRenderEvent = CustomEvent
  *   </turbo-stream>
  */
 export class StreamElement extends HTMLElement {
+  static async renderElement(newElement: StreamElement): Promise<void> {
+    await newElement.performAction()
+  }
+
   async connectedCallback() {
     try {
       await this.render()
@@ -40,9 +46,11 @@ export class StreamElement extends HTMLElement {
 
   async render() {
     return (this.renderPromise ??= (async () => {
-      if (this.dispatchEvent(this.beforeRenderEvent)) {
+      const event = this.beforeRenderEvent
+
+      if (this.dispatchEvent(event)) {
         await nextAnimationFrame()
-        this.performAction()
+        await event.detail.render(this)
       }
     })())
   }
@@ -109,7 +117,11 @@ export class StreamElement extends HTMLElement {
    * Gets the main `<template>` used for rendering
    */
   get templateElement() {
-    if (this.firstElementChild instanceof HTMLTemplateElement) {
+    if (this.firstElementChild === null) {
+      const template = this.ownerDocument.createElement("template")
+      this.appendChild(template)
+      return template
+    } else if (this.firstElementChild instanceof HTMLTemplateElement) {
       return this.firstElementChild
     }
     this.raise("first child element must be a <template> element")
@@ -149,6 +161,7 @@ export class StreamElement extends HTMLElement {
     return new CustomEvent("turbo:before-stream-render", {
       bubbles: true,
       cancelable: true,
+      detail: { newStream: this, render: StreamElement.renderElement },
     })
   }
 

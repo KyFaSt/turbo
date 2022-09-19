@@ -8,6 +8,8 @@ import {
   nextBody,
   nextEventNamed,
   pathname,
+  propertyForSelector,
+  readEventLogs,
   scrollToSelector,
   selectorHasFocus,
   sleep,
@@ -19,6 +21,7 @@ import {
 test.beforeEach(async ({ page }) => {
   await page.goto("/src/tests/fixtures/rendering.html")
   await clearLocalStorage(page)
+  await readEventLogs(page)
 })
 
 test("test triggers before-render and render events", async ({ page }) => {
@@ -187,6 +190,74 @@ test("test does not evaluate head stylesheet elements inside noscript elements",
   assert.equal(await isNoscriptStylesheetEvaluated(page), false)
 })
 
+test("test waits for CSS to be loaded before rendering", async ({ page }) => {
+  let finishLoadingCSS = (_value?: unknown) => {}
+  const promise = new Promise((resolve) => {
+    finishLoadingCSS = resolve
+  })
+  page.route("**/*.css", async (route) => {
+    await promise
+    route.continue()
+  })
+
+  await page.click("#additional-assets-link")
+
+  assert.equal(await isStylesheetEvaluated(page), false)
+  assert.notEqual(await page.textContent("h1"), "Additional assets")
+
+  finishLoadingCSS()
+
+  await nextEventNamed(page, "turbo:render")
+
+  assert.equal(await page.textContent("h1"), "Additional assets")
+  assert.equal(await isStylesheetEvaluated(page), true)
+})
+
+test("test waits for CSS to fail before rendering", async ({ page }) => {
+  let finishLoadingCSS = (_value?: unknown) => {}
+  const promise = new Promise((resolve) => {
+    finishLoadingCSS = resolve
+  })
+  page.route("**/*.css", async (route) => {
+    await promise
+    route.abort()
+  })
+
+  await page.click("#additional-assets-link")
+
+  assert.equal(await isStylesheetEvaluated(page), false)
+  assert.notEqual(await page.textContent("h1"), "Additional assets")
+
+  finishLoadingCSS()
+
+  await nextEventNamed(page, "turbo:render")
+
+  assert.equal(await page.textContent("h1"), "Additional assets")
+  assert.equal(await isStylesheetEvaluated(page), false)
+})
+
+test("test waits for some time, but renders if CSS takes too much to load", async ({ page }) => {
+  let finishLoadingCSS = (_value?: unknown) => {}
+  const promise = new Promise((resolve) => {
+    finishLoadingCSS = resolve
+  })
+  page.route("**/*.css", async (route) => {
+    await promise
+    route.continue()
+  })
+
+  await page.click("#additional-assets-link")
+  await nextEventNamed(page, "turbo:render")
+
+  assert.equal(await page.textContent("h1"), "Additional assets")
+  assert.equal(await isStylesheetEvaluated(page), false)
+
+  finishLoadingCSS()
+  await nextBeat()
+
+  assert.equal(await isStylesheetEvaluated(page), true)
+})
+
 test("skip evaluates head script elements once", async ({ page }) => {
   assert.equal(await headScriptEvaluationCount(page), undefined)
 
@@ -322,6 +393,91 @@ test("test preserves permanent element video playback", async ({ page }) => {
 
   const timeAfterRender = await videoElement.evaluate((video: HTMLVideoElement) => video.currentTime)
   assert.equal(timeAfterRender, timeBeforeRender, "element state is preserved")
+})
+
+test("test preserves permanent element through Turbo Stream update", async ({ page }) => {
+  await page.evaluate(() => {
+    window.Turbo.renderStreamMessage(`
+      <turbo-stream action="update" target="frame">
+        <template>
+          <div id="permanent-in-frame" data-turbo-permanent>Ignored</div>
+        </template>
+      </turbo-stream>
+    `)
+  })
+  await nextBeat()
+
+  assert.equal(await page.textContent("#permanent-in-frame"), "Rendering")
+})
+
+test("test preserves permanent element through Turbo Stream append", async ({ page }) => {
+  await page.evaluate(() => {
+    window.Turbo.renderStreamMessage(`
+      <turbo-stream action="append" target="frame">
+        <template>
+          <div id="permanent-in-frame" data-turbo-permanent>Ignored</div>
+        </template>
+      </turbo-stream>
+    `)
+  })
+  await nextBeat()
+
+  assert.equal(await page.textContent("#permanent-in-frame"), "Rendering")
+})
+
+test("test preserves input values", async ({ page }) => {
+  await page.fill("#text-input", "test")
+  await page.click("#checkbox-input")
+  await page.click("#radio-input")
+  await page.fill("#textarea", "test")
+  await page.selectOption("#select", "2")
+  await page.selectOption("#select-multiple", "2")
+
+  await page.click("#same-origin-link")
+  await nextEventNamed(page, "turbo:load")
+  await page.goBack()
+  await nextEventNamed(page, "turbo:load")
+
+  assert.equal(await propertyForSelector(page, "#text-input", "value"), "test")
+  assert.equal(await propertyForSelector(page, "#checkbox-input", "checked"), true)
+  assert.equal(await propertyForSelector(page, "#radio-input", "checked"), true)
+  assert.equal(await propertyForSelector(page, "#textarea", "value"), "test")
+  assert.equal(await propertyForSelector(page, "#select", "value"), "2")
+  assert.equal(await propertyForSelector(page, "#select-multiple", "value"), "2")
+})
+
+test("test does not preserve password values", async ({ page }) => {
+  await page.fill("#password-input", "test")
+
+  await page.click("#same-origin-link")
+  await nextEventNamed(page, "turbo:load")
+  await page.goBack()
+  await nextEventNamed(page, "turbo:load")
+
+  assert.equal(await propertyForSelector(page, "#password-input", "value"), "")
+})
+
+test("test <input type='reset'> clears values when restored from cache", async ({ page }) => {
+  await page.fill("#text-input", "test")
+  await page.click("#checkbox-input")
+  await page.click("#radio-input")
+  await page.fill("#textarea", "test")
+  await page.selectOption("#select", "2")
+  await page.selectOption("#select-multiple", "2")
+
+  await page.click("#same-origin-link")
+  await nextEventNamed(page, "turbo:load")
+  await page.goBack()
+  await nextEventNamed(page, "turbo:load")
+
+  await page.click("#reset-input")
+
+  assert.equal(await propertyForSelector(page, "#text-input", "value"), "")
+  assert.equal(await propertyForSelector(page, "#checkbox-input", "checked"), false)
+  assert.equal(await propertyForSelector(page, "#radio-input", "checked"), false)
+  assert.equal(await propertyForSelector(page, "#textarea", "value"), "")
+  assert.equal(await propertyForSelector(page, "#select", "value"), "1")
+  assert.equal(await propertyForSelector(page, "#select-multiple", "value"), "")
 })
 
 test("test before-cache event", async ({ page }) => {

@@ -1,71 +1,119 @@
 import { test } from "@playwright/test"
 import { assert } from "chai"
-import { nextBeat } from "../helpers/page"
+import { nextBeat, nextEventNamed, readEventLogs } from "../helpers/page"
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/src/tests/fixtures/stream.html")
+  await readEventLogs(page)
 })
 
 test("test receiving a stream message", async ({ page }) => {
-  const selector = "#messages div.message:last-child"
+  const messages = await page.locator("#messages .message")
 
-  assert.equal(await page.textContent(selector), "First")
+  assert.deepEqual(await messages.allTextContents(), ["First"])
 
-  await page.click("#create [type=submit]")
+  await page.click("#append-target button")
   await nextBeat()
 
-  assert.equal(await page.textContent(selector), "Hello world!")
+  assert.deepEqual(await messages.allTextContents(), ["First", "Hello world!"])
+})
+
+test("test dispatches a turbo:before-stream-render event", async ({ page }) => {
+  await page.click("#append-target button")
+  await nextEventNamed(page, "turbo:submit-end")
+  const [[type, { newStream }, target]] = await readEventLogs(page, 1)
+
+  assert.equal(type, "turbo:before-stream-render")
+  assert.equal(target, "a-turbo-stream")
+  assert.ok(newStream.includes(`action="append"`))
+  assert.ok(newStream.includes(`target="messages"`))
 })
 
 test("test receiving a stream message with css selector target", async ({ page }) => {
-  let element
-  const selector = ".messages div.message:last-child"
+  const messages2 = await page.locator("#messages_2 .message")
+  const messages3 = await page.locator("#messages_3 .message")
 
-  element = await page.locator(selector).allTextContents()
-  assert.equal(await element[0], "Second")
-  assert.equal(await element[1], "Third")
+  assert.deepEqual(await messages2.allTextContents(), ["Second"])
+  assert.deepEqual(await messages3.allTextContents(), ["Third"])
 
-  await page.click("#replace [type=submit]")
+  await page.click("#append-targets button")
   await nextBeat()
 
-  element = await page.locator(selector).allTextContents()
-  assert.equal(await element[0], "Hello CSS!")
-  assert.equal(await element[1], "Hello CSS!")
+  assert.deepEqual(await messages2.allTextContents(), ["Second", "Hello CSS!"])
+  assert.deepEqual(await messages3.allTextContents(), ["Third", "Hello CSS!"])
+})
+
+test("test receiving a message without a template", async ({ page }) => {
+  await page.evaluate(() =>
+    window.Turbo.renderStreamMessage(`
+      <turbo-stream action="remove" target="messages"></turbo-stream>
+    `)
+  )
+
+  assert.equal(await await page.locator("#messages").count(), 0, "removes target element")
+})
+
+test("test receiving a message with a <script> element", async ({ page }) => {
+  const messages = await page.locator("#messages .message")
+
+  await page.evaluate(() =>
+    window.Turbo.renderStreamMessage(`
+      <turbo-stream action="append" target="messages">
+        <template>
+          <script>
+            const messages = document.querySelector("#messages .message")
+            messages.textContent = "Hello from script"
+          </script>
+        </template>
+      </turbo-stream>
+    `)
+  )
+
+  assert.deepEqual(await messages.allTextContents(), ["Hello from script"])
 })
 
 test("test overriding with custom StreamActions", async ({ page }) => {
   const html = "Rendered with Custom Action"
 
   await page.evaluate((html) => {
-    window.Turbo.StreamActions.customUpdate = function () {
-      for (const target of this.targetElements) target.innerHTML = html
+    const CustomActions: Record<string, any> = {
+      customUpdate(newStream: { targetElements: HTMLElement[] }) {
+        for (const target of newStream.targetElements) target.innerHTML = html
+      },
     }
-    document.body.insertAdjacentHTML(
-      "afterbegin",
-      `<turbo-stream action="customUpdate" target="messages">
+
+    addEventListener("turbo:before-stream-render", (({ target, detail }: CustomEvent) => {
+      const stream = target as unknown as { action: string }
+
+      const defaultRender = detail.render
+      detail.render = CustomActions[stream.action] || defaultRender
+    }) as EventListener)
+
+    window.Turbo.renderStreamMessage(`
+      <turbo-stream action="customUpdate" target="messages">
         <template></template>
-      </turbo-stream>`
-    )
+      </turbo-stream>
+    `)
   }, html)
 
   assert.equal(await page.textContent("#messages"), html, "evaluates custom StreamAction")
 })
 
 test("test receiving a stream message asynchronously", async ({ page }) => {
-  let messages = await page.locator("#messages > *").allTextContents()
+  await page.evaluate(() => {
+    document.body.insertAdjacentHTML(
+      "afterbegin",
+      `<turbo-stream-source id="stream-source" src="/__turbo/messages"></turbo-stream-source>`
+    )
+  })
+  const messages = await page.locator("#messages .message")
 
-  assert.ok(messages[0])
-  assert.notOk(messages[1], "receives streams when connected")
-  assert.notOk(messages[2], "receives streams when connected")
+  assert.deepEqual(await messages.allTextContents(), ["First"])
 
   await page.click("#async button")
   await nextBeat()
 
-  messages = await page.locator("#messages > *").allTextContents()
-
-  assert.ok(messages[0])
-  assert.ok(messages[1], "receives streams when connected")
-  assert.notOk(messages[2], "receives streams when connected")
+  assert.deepEqual(await messages.allTextContents(), ["First", "Hello world!"])
 
   await page.evaluate(() => document.getElementById("stream-source")?.remove())
   await nextBeat()
@@ -73,9 +121,5 @@ test("test receiving a stream message asynchronously", async ({ page }) => {
   await page.click("#async button")
   await nextBeat()
 
-  messages = await page.locator("#messages > *").allTextContents()
-
-  assert.ok(messages[0])
-  assert.ok(messages[1], "receives streams when connected")
-  assert.notOk(messages[2], "does not receive streams when disconnected")
+  assert.deepEqual(await messages.allTextContents(), ["First", "Hello world!"])
 })

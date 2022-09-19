@@ -3,11 +3,12 @@ import { assert } from "chai"
 import {
   attributeForSelector,
   hasSelector,
+  nextAttributeMutationNamed,
   nextBeat,
   nextBody,
   nextEventNamed,
   nextEventOnTarget,
-  noNextEventNamed,
+  noNextEventOnTarget,
   readEventLogs,
 } from "../helpers/page"
 
@@ -103,18 +104,16 @@ test("test changing src attribute on a frame with loading=eager navigates", asyn
 })
 
 test("test reloading a frame reloads the content", async ({ page }) => {
-  await nextBeat()
-
   await page.click("#loading-eager summary")
-  await nextBeat()
+  await nextEventOnTarget(page, "frame", "turbo:frame-load")
 
   const frameContent = "#loading-eager turbo-frame#frame h2"
   assert.ok(await hasSelector(page, frameContent))
-  assert.ok(await hasSelector(page, "#loading-eager turbo-frame[complete]"), "has [complete] attribute")
+  assert.equal(await nextAttributeMutationNamed(page, "frame", "complete"), "", "has [complete] attribute")
 
   await page.evaluate(() => (document.querySelector("#loading-eager turbo-frame") as any)?.reload())
   assert.ok(await hasSelector(page, frameContent))
-  assert.ok(await hasSelector(page, "#loading-eager turbo-frame:not([complete])"), "clears [complete] attribute")
+  assert.equal(await nextAttributeMutationNamed(page, "frame", "complete"), null, "clears [complete] attribute")
 })
 
 test("test navigating away from a page does not reload its frames", async ({ page }) => {
@@ -138,7 +137,6 @@ test("test removing the [complete] attribute of an eager frame reloads the conte
 })
 
 test("test changing [src] attribute on a [complete] frame with loading=lazy defers navigation", async ({ page }) => {
-  await nextEventOnTarget(page, "frame", "turbo:frame-load")
   await page.click("#loading-lazy summary")
   await nextEventOnTarget(page, "hello", "turbo:frame-load")
 
@@ -150,7 +148,7 @@ test("test changing [src] attribute on a [complete] frame with loading=lazy defe
   await nextEventNamed(page, "turbo:load")
   await page.goBack()
   await nextEventNamed(page, "turbo:load")
-  await noNextEventNamed(page, "turbo:frame-load")
+  await noNextEventOnTarget(page, "hello", "turbo:frame-load")
 
   let src = new URL((await attributeForSelector(page, "#hello", "src")) || "")
 
@@ -158,7 +156,7 @@ test("test changing [src] attribute on a [complete] frame with loading=lazy defe
   assert.equal(src.pathname, "/src/tests/fixtures/frames/hello.html", "lazy frame retains [src]")
 
   await page.click("#link-lazy-frame")
-  await noNextEventNamed(page, "turbo:frame-load")
+  await noNextEventOnTarget(page, "hello", "turbo:frame-load")
 
   assert.ok(await hasSelector(page, "#loading-lazy turbo-frame:not([complete])"), "lazy frame is not complete")
 

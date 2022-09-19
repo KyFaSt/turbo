@@ -5,12 +5,13 @@ import { FormSubmitObserver, FormSubmitObserverDelegate } from "../observers/for
 import { FrameRedirector } from "./frames/frame_redirector"
 import { History, HistoryDelegate } from "./drive/history"
 import { LinkClickObserver, LinkClickObserverDelegate } from "../observers/link_click_observer"
-import { FormLinkInterceptor, FormLinkInterceptorDelegate } from "../observers/form_link_interceptor"
+import { FormLinkClickObserver, FormLinkClickObserverDelegate } from "../observers/form_link_click_observer"
 import { getAction, getExtension, expandURL, isPrefixedBy, Locatable } from "./url"
 import { Navigator, NavigatorDelegate } from "./drive/navigator"
 import { PageObserver, PageObserverDelegate } from "../observers/page_observer"
 import { ScrollObserver } from "../observers/scroll_observer"
 import { StreamMessage } from "./streams/stream_message"
+import { StreamMessageRenderer } from "./streams/stream_message_renderer"
 import { StreamObserver } from "../observers/stream_observer"
 import { Action, Position, StreamSource, isAction } from "./types"
 import { clearBusyState, dispatch, markAsBusy } from "../util"
@@ -22,6 +23,7 @@ import { FrameViewRenderOptions } from "./frames/frame_view"
 import { FetchResponse } from "../http/fetch_response"
 import { Preloader, PreloaderDelegate } from "./drive/preloader"
 
+export type FormMode = "on" | "off" | "optin"
 export type TimingData = unknown
 export type TurboBeforeCacheEvent = CustomEvent
 export type TurboBeforeRenderEvent = CustomEvent<{ newBody: HTMLBodyElement } & PageViewRenderOptions>
@@ -38,7 +40,7 @@ export class Session
   implements
     FormSubmitObserverDelegate,
     HistoryDelegate,
-    FormLinkInterceptorDelegate,
+    FormLinkClickObserverDelegate,
     LinkClickObserverDelegate,
     NavigatorDelegate,
     PageObserverDelegate,
@@ -53,24 +55,25 @@ export class Session
 
   readonly pageObserver = new PageObserver(this)
   readonly cacheObserver = new CacheObserver()
-  readonly linkClickObserver = new LinkClickObserver(this)
+  readonly linkClickObserver = new LinkClickObserver(this, window)
   readonly formSubmitObserver = new FormSubmitObserver(this, document)
   readonly scrollObserver = new ScrollObserver(this)
   readonly streamObserver = new StreamObserver(this)
-  readonly formLinkInterceptor = new FormLinkInterceptor(this, document.documentElement)
-  readonly frameRedirector = new FrameRedirector(document.documentElement, this)
+  readonly formLinkClickObserver = new FormLinkClickObserver(this, document.documentElement)
+  readonly frameRedirector = new FrameRedirector(this, document.documentElement)
+  readonly streamMessageRenderer = new StreamMessageRenderer()
 
   drive = true
   enabled = true
   progressBarDelay = 500
   started = false
-  formMode = "on"
+  formMode: FormMode = "on"
 
   start() {
     if (!this.started) {
       this.pageObserver.start()
       this.cacheObserver.start()
-      this.formLinkInterceptor.start()
+      this.formLinkClickObserver.start()
       this.linkClickObserver.start()
       this.formSubmitObserver.start()
       this.scrollObserver.start()
@@ -91,7 +94,7 @@ export class Session
     if (this.started) {
       this.pageObserver.stop()
       this.cacheObserver.stop()
-      this.formLinkInterceptor.stop()
+      this.formLinkClickObserver.stop()
       this.linkClickObserver.stop()
       this.formSubmitObserver.stop()
       this.scrollObserver.stop()
@@ -107,7 +110,14 @@ export class Session
   }
 
   visit(location: Locatable, options: Partial<VisitOptions> = {}) {
-    this.navigator.proposeVisit(expandURL(location), options)
+    const frameElement = options.frame ? document.getElementById(options.frame) : null
+
+    if (frameElement instanceof FrameElement) {
+      frameElement.src = location.toString()
+      frameElement.loaded
+    } else {
+      this.navigator.proposeVisit(expandURL(location), options)
+    }
   }
 
   connectStreamSource(source: StreamSource) {
@@ -119,7 +129,7 @@ export class Session
   }
 
   renderStreamMessage(message: StreamMessage | string) {
-    document.documentElement.appendChild(StreamMessage.wrap(message).fragment)
+    this.streamMessageRenderer.render(StreamMessage.wrap(message))
   }
 
   clearCache() {
@@ -138,7 +148,7 @@ export class Session
     this.progressBarDelay = delay
   }
 
-  setFormMode(mode: string) {
+  setFormMode(mode: FormMode) {
     this.formMode = mode
   }
 
@@ -171,19 +181,19 @@ export class Session
     this.history.updateRestorationData({ scrollPosition: position })
   }
 
-  // Form link interceptor delegate
+  // Form click observer delegate
 
-  shouldInterceptFormLinkClick(_link: Element): boolean {
-    return true
+  willSubmitFormLinkToLocation(link: Element, location: URL): boolean {
+    return this.elementIsNavigatable(link) && this.locationIsVisitable(location, this.snapshot.rootLocation)
   }
 
-  formLinkClickIntercepted(_link: Element, _form: HTMLFormElement) {}
+  submittedFormLinkToLocation() {}
 
   // Link click observer delegate
 
   willFollowLinkToLocation(link: Element, location: URL, event: MouseEvent) {
     return (
-      this.elementDriveEnabled(link) &&
+      this.elementIsNavigatable(link) &&
       this.locationIsVisitable(location, this.snapshot.rootLocation) &&
       this.applicationAllowsFollowingLinkToLocation(link, location, event)
     )
@@ -191,7 +201,9 @@ export class Session
 
   followedLinkToLocation(link: Element, location: URL) {
     const action = this.getActionForLink(link)
-    this.visit(location.href, { action })
+    const acceptsStreamResponse = link.hasAttribute("data-turbo-stream")
+
+    this.visit(location.href, { action, acceptsStreamResponse })
   }
 
   // Navigator delegate
@@ -206,6 +218,9 @@ export class Session
   }
 
   visitStarted(visit: Visit) {
+    if (!visit.acceptsStreamResponse) {
+      markAsBusy(document.documentElement)
+    }
     extendURLWithDeprecatedProperties(visit.location)
     if (!visit.silent) {
       this.notifyApplicationAfterVisitingLocation(visit.location, visit.action)
@@ -213,6 +228,7 @@ export class Session
   }
 
   visitCompleted(visit: Visit) {
+    clearBusyState(document.documentElement)
     this.notifyApplicationAfterPageLoad(visit.getTimingMetrics())
   }
 
@@ -230,8 +246,7 @@ export class Session
     const action = getAction(form, submitter)
 
     return (
-      this.elementDriveEnabled(form) &&
-      (!submitter || this.formElementDriveEnabled(submitter)) &&
+      this.submissionIsNavigatable(form, submitter) &&
       this.locationIsVisitable(expandURL(action), this.snapshot.rootLocation)
     )
   }
@@ -334,7 +349,6 @@ export class Session
   }
 
   notifyApplicationAfterVisitingLocation(location: URL, action: Action) {
-    markAsBusy(document.documentElement)
     return dispatch<TurboVisitEvent>("turbo:visit", { detail: { url: location.href, action } })
   }
 
@@ -354,7 +368,6 @@ export class Session
   }
 
   notifyApplicationAfterPageLoad(timing: TimingData = {}) {
-    clearBusyState(document.documentElement)
     return dispatch<TurboLoadEvent>("turbo:load", {
       detail: { url: this.location.href, timing },
     })
@@ -383,30 +396,34 @@ export class Session
 
   // Helpers
 
-  formElementDriveEnabled(element?: Element) {
+  submissionIsNavigatable(form: HTMLFormElement, submitter?: HTMLElement): boolean {
     if (this.formMode == "off") {
       return false
+    } else {
+      const submitterIsNavigatable = submitter ? this.elementIsNavigatable(submitter) : true
+
+      if (this.formMode == "optin") {
+        return submitterIsNavigatable && form.closest('[data-turbo="true"]') != null
+      } else {
+        return submitterIsNavigatable && this.elementIsNavigatable(form)
+      }
     }
-    if (this.formMode == "optin") {
-      const form = element?.closest("form[data-turbo]")
-      return form?.getAttribute("data-turbo") == "true"
-    }
-    return this.elementDriveEnabled(element)
   }
 
-  elementDriveEnabled(element?: Element) {
-    const container = element?.closest("[data-turbo]")
+  elementIsNavigatable(element: Element): boolean {
+    const container = element.closest("[data-turbo]")
+    const withinFrame = element.closest("turbo-frame")
 
-    // Check if Drive is enabled on the session.
-    if (this.drive) {
-      // Drive should be enabled by default, unless `data-turbo="false"`.
+    // Check if Drive is enabled on the session or we're within a Frame.
+    if (this.drive || withinFrame) {
+      // Element is navigatable by default, unless `data-turbo="false"`.
       if (container) {
         return container.getAttribute("data-turbo") != "false"
       } else {
         return true
       }
     } else {
-      // Drive should be disabled by default, unless `data-turbo="true"`.
+      // Element isn't navigatable by default, unless `data-turbo="true"`.
       if (container) {
         return container.getAttribute("data-turbo") == "true"
       } else {

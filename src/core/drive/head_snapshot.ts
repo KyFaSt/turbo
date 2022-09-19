@@ -40,19 +40,19 @@ export class HeadSnapshot extends Snapshot<HTMLHeadElement> {
   }
 
   getScriptElementsNotInSnapshot(snapshot: HeadSnapshot) {
-    return this.getElementsMatchingTypeNotInSnapshot("script", snapshot)
+    return this.getElementsMatchingTypeNotInSnapshot<HTMLScriptElement>("script", snapshot)
   }
 
   getStylesheetElementsNotInSnapshot(snapshot: HeadSnapshot) {
-    return this.getElementsMatchingTypeNotInSnapshot("stylesheet", snapshot)
+    return this.getElementsMatchingTypeNotInSnapshot<HTMLLinkElement>("stylesheet", snapshot)
   }
 
-  getElementsMatchingTypeNotInSnapshot(matchedType: ElementType, snapshot: HeadSnapshot) {
+  getElementsMatchingTypeNotInSnapshot<T extends Element>(matchedType: ElementType, snapshot: HeadSnapshot): T[] {
     return Object.keys(this.detailsByOuterHTML)
       .filter((outerHTML) => !(outerHTML in snapshot.detailsByOuterHTML))
       .map((outerHTML) => this.detailsByOuterHTML[outerHTML])
       .filter(({ type }) => type == matchedType)
-      .map(({ elements: [element] }) => element)
+      .map(({ elements: [element] }) => element) as T[]
   }
 
   get provisionalElements(): Element[] {
@@ -96,22 +96,22 @@ function elementIsTracked(element: Element) {
 }
 
 function elementIsScript(element: Element) {
-  const tagName = element.tagName.toLowerCase()
+  const tagName = element.localName
   return tagName == "script"
 }
 
 function elementIsNoscript(element: Element) {
-  const tagName = element.tagName.toLowerCase()
+  const tagName = element.localName
   return tagName == "noscript"
 }
 
 function elementIsStylesheet(element: Element) {
-  const tagName = element.tagName.toLowerCase()
+  const tagName = element.localName
   return tagName == "style" || (tagName == "link" && element.getAttribute("rel") == "stylesheet")
 }
 
 function elementIsMetaElementWithName(element: Element, name: string) {
-  const tagName = element.tagName.toLowerCase()
+  const tagName = element.localName
   return tagName == "meta" && element.getAttribute("name") == name
 }
 

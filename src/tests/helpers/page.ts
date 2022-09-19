@@ -1,7 +1,14 @@
 import { JSHandle, Locator, Page } from "@playwright/test"
 
-type EventLog = [string, any, string | null]
-type MutationLog = [string, string | null, string | null]
+type Target = string | null
+
+type EventType = string
+type EventDetail = any
+type EventLog = [EventType, EventDetail, Target]
+
+type MutationAttributeName = string
+type MutationAttributeValue = string | null
+type MutationLog = [MutationAttributeName, Target, MutationAttributeValue]
 
 export function attributeForSelector(page: Page, selector: string, attributeName: string): Promise<string | null> {
   return page.locator(selector).getAttribute(attributeName)
@@ -52,7 +59,7 @@ export async function isScrolledToSelector(page: Page, selector: string): Promis
     const { y: pageY } = await scrollPosition(page)
     const { y: elementY } = boundingBox
     const offset = pageY - elementY
-    return Math.abs(offset) < 2
+    return Math.abs(offset) <= 2
   } else {
     return false
   }
@@ -96,6 +103,15 @@ export async function nextAttributeMutationNamed(
   }
   const attributeValue = record[2]
   return attributeValue
+}
+
+export async function noNextAttributeMutationNamed(
+  page: Page,
+  elementId: string,
+  attributeName: string
+): Promise<boolean> {
+  const records = await readMutationLogs(page, 1)
+  return !records.some(([name]) => name == attributeName)
 }
 
 export async function noNextEventNamed(page: Page, eventName: string): Promise<boolean> {

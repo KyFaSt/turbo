@@ -32,6 +32,22 @@ test.beforeEach(async ({ page }) => {
   await readEventLogs(page)
 })
 
+test("test navigating a frame with Turbo.visit", async ({ page }) => {
+  const pathname = "/src/tests/fixtures/frames/frame.html"
+
+  await page.locator("#frame").evaluate((frame) => frame.setAttribute("disabled", ""))
+  await page.evaluate((pathname) => window.Turbo.visit(pathname, { frame: "frame" }), pathname)
+  await nextBeat()
+
+  assert.equal(await page.textContent("#frame h2"), "Frames: #frame", "does not navigate a disabled frame")
+
+  await page.locator("#frame").evaluate((frame) => frame.removeAttribute("disabled"))
+  await page.evaluate((pathname) => window.Turbo.visit(pathname, { frame: "frame" }), pathname)
+  await nextBeat()
+
+  assert.equal(await page.textContent("#frame h2"), "Frame: loaded", "navigates the target frame")
+})
+
 test("test navigating a frame a second time does not leak event listeners", async ({ page }) => {
   await withoutChangingEventListenersCount(page, async () => {
     await page.click("#outer-frame-link")
@@ -97,10 +113,107 @@ test("test following a link driving a frame toggles the [aria-busy=true] attribu
   )
 })
 
-test("test following a link to a page without a matching frame results in an empty frame", async ({ page }) => {
-  await page.click("#missing a")
-  await nextBeat()
-  assert.notOk(await innerHTMLForSelector(page, "#missing"))
+test("test successfully following a link to a page without a matching frame dispatches a turbo:frame-missing event", async ({
+  page,
+}) => {
+  await page.click("#missing-frame-link")
+  await nextEventOnTarget(page, "missing", "turbo:before-fetch-request")
+  const { response } = await nextEventOnTarget(page, "missing", "turbo:frame-missing")
+  await noNextEventNamed(page, "turbo:before-fetch-request")
+  await nextEventNamed(page, "turbo:load")
+
+  assert.ok(response, "dispatches turbo:frame-missing with event.detail.response")
+  assert.equal(pathname(page.url()), "/src/tests/fixtures/frames/frame.html", "navigates the page")
+
+  await page.goBack()
+  await nextEventNamed(page, "turbo:load")
+
+  assert.equal(pathname(page.url()), "/src/tests/fixtures/frames.html")
+  assert.ok(await innerHTMLForSelector(page, "#missing"))
+})
+
+test("test failing to follow a link to a page without a matching frame dispatches a turbo:frame-missing event", async ({
+  page,
+}) => {
+  await page.click("#missing-page-link")
+  await nextEventOnTarget(page, "missing", "turbo:before-fetch-request")
+  const { response } = await nextEventOnTarget(page, "missing", "turbo:frame-missing")
+  await noNextEventNamed(page, "turbo:before-fetch-request")
+  await noNextEventNamed(page, "turbo:load")
+  await nextEventNamed(page, "turbo:render")
+
+  assert.ok(response, "dispatches turbo:frame-missing with event.detail.response")
+  assert.equal(pathname(page.url()), "/missing.html", "navigates the page")
+
+  await page.goBack()
+  await nextEventNamed(page, "turbo:load")
+
+  assert.equal(pathname(page.url()), "/src/tests/fixtures/frames.html")
+  assert.ok(await innerHTMLForSelector(page, "#missing"))
+})
+
+test("test the turbo:frame-missing event following a link to a page without a matching frame can be handled", async ({
+  page,
+}) => {
+  await page.locator("#missing").evaluate((frame) => {
+    frame.addEventListener(
+      "turbo:frame-missing",
+      ((event) => {
+        if (event.target instanceof Element) {
+          event.preventDefault()
+          event.target.textContent = "Overridden"
+        }
+      }) as EventListener,
+      { once: true }
+    )
+  })
+  await page.click("#missing-frame-link")
+  await nextEventOnTarget(page, "missing", "turbo:frame-missing")
+
+  assert.equal(await page.textContent("#missing"), "Overridden")
+})
+
+test("test the turbo:frame-missing event following a link to a page without a matching frame can drive a Visit", async ({
+  page,
+}) => {
+  await page.locator("#missing").evaluate((frame) => {
+    frame.addEventListener(
+      "turbo:frame-missing",
+      ((event: CustomEvent) => {
+        event.preventDefault()
+        const { response, visit } = event.detail
+
+        visit(response)
+      }) as EventListener,
+      { once: true }
+    )
+  })
+  await page.click("#missing-frame-link")
+  await nextEventOnTarget(page, "missing", "turbo:frame-missing")
+  await nextEventNamed(page, "turbo:load")
+
+  assert.equal(await page.textContent("h1"), "Frames: #frame")
+  assert.notOk(await hasSelector(page, "turbo-frame#missing"))
+
+  await page.goBack()
+  await nextEventNamed(page, "turbo:load")
+
+  assert.equal(pathname(page.url()), "/src/tests/fixtures/frames.html")
+  assert.equal(await innerHTMLForSelector(page, "#missing"), "")
+})
+
+test("test following a link to a page with a matching frame does not dispatch a turbo:frame-missing event", async ({
+  page,
+}) => {
+  await page.click("#link-frame")
+  await noNextEventNamed(page, "turbo:frame-missing")
+  await nextEventOnTarget(page, "frame", "turbo:frame-load")
+
+  const src = await attributeForSelector(page, "#frame", "src")
+  assert(
+    src?.includes("/src/tests/fixtures/frames/frame.html"),
+    "navigates frame without dispatching turbo:frame-missing"
+  )
 })
 
 test("test following a link within a frame with a target set navigates the target frame", async ({ page }) => {
@@ -207,24 +320,28 @@ test("test following a link that declares data-turbo-frame='_self' within a fram
 test("test following a link to a page with a <turbo-frame recurse> which lazily loads a matching frame", async ({
   page,
 }) => {
-  await nextBeat()
   await page.click("#recursive summary")
+
   assert.ok(await hasSelector(page, "#recursive details[open]"))
 
   await page.click("#recursive a")
-  await nextBeat()
+  await nextEventOnTarget(page, "recursive", "turbo:frame-load")
+  await nextEventOnTarget(page, "composer", "turbo:frame-load")
+
   assert.ok(await hasSelector(page, "#recursive details:not([open])"))
 })
 
 test("test submitting a form that redirects to a page with a <turbo-frame recurse> which lazily loads a matching frame", async ({
   page,
 }) => {
-  await nextBeat()
   await page.click("#recursive summary")
+
   assert.ok(await hasSelector(page, "#recursive details[open]"))
 
   await page.click("#recursive input[type=submit]")
-  await nextBeat()
+  await nextEventOnTarget(page, "recursive", "turbo:frame-load")
+  await nextEventOnTarget(page, "composer", "turbo:frame-load")
+
   assert.ok(await hasSelector(page, "#recursive details:not([open])"))
 })
 
@@ -261,20 +378,18 @@ test("test does not evaluate data-turbo-eval=false scripts", async ({ page }) =>
 })
 
 test("test redirecting in a form is still navigatable after redirect", async ({ page }) => {
-  await nextBeat()
   await page.click("#navigate-form-redirect")
-  await nextBeat()
-  assert.ok(await hasSelector(page, "#form-redirect"))
+  await nextEventOnTarget(page, "form-redirect", "turbo:frame-load")
+  assert.equal(await page.textContent("turbo-frame#form-redirect h2"), "Form Redirect")
 
-  await nextBeat()
   await page.click("#submit-form")
-  await nextBeat()
-  assert.ok(await hasSelector(page, "#form-redirected-header"))
+  await nextEventOnTarget(page, "form-redirect", "turbo:frame-load")
+  assert.equal(await page.textContent("turbo-frame#form-redirect h2"), "Form Redirected")
 
-  await nextBeat()
   await page.click("#navigate-form-redirect")
-  await nextBeat()
-  assert.ok(await hasSelector(page, "#form-redirect-header"))
+  await nextEventOnTarget(page, "form-redirect", "turbo:frame-load")
+
+  assert.equal(await page.textContent("turbo-frame#form-redirect h2"), "Form Redirect")
 })
 
 test("test 'turbo:frame-render' is triggered after frame has finished rendering", async ({ page }) => {
