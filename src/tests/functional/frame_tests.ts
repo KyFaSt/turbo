@@ -492,6 +492,25 @@ test("test navigating a frame targeting _top from an outer link fires events", a
   assert.equal(otherEvents.length, 0, "no more events")
 })
 
+test("test invoking .reload() re-fetches the frame's content", async ({ page }) => {
+  await page.click("#link-frame")
+  await nextEventOnTarget(page, "frame", "turbo:frame-load")
+  await page.evaluate(() => (document.getElementById("frame") as any).reload())
+
+  const dispatchedEvents = await readEventLogs(page)
+
+  assert.deepEqual(
+    dispatchedEvents.map(([name, _, id]) => [id, name]),
+    [
+      ["frame", "turbo:before-fetch-request"],
+      ["frame", "turbo:before-fetch-response"],
+      ["frame", "turbo:before-frame-render"],
+      ["frame", "turbo:frame-render"],
+      ["frame", "turbo:frame-load"],
+    ]
+  )
+})
+
 test("test following inner link reloads frame on every click", async ({ page }) => {
   await page.click("#hello a")
   await nextEventNamed(page, "turbo:before-fetch-request")
@@ -778,12 +797,11 @@ test("test navigating back after pushing URL state from a turbo-frame[data-turbo
 
   const title = await page.textContent("h1")
   const frameTitle = await page.textContent("#frame h2")
-  const src = new URL((await attributeForSelector(page, "#frame", "src")) || "")
 
   assert.equal(title, "Frames")
   assert.equal(frameTitle, "Frames: #frame")
   assert.equal(pathname(page.url()), "/src/tests/fixtures/frames.html")
-  assert.equal(src.pathname, "/src/tests/fixtures/frames/frame.html")
+  assert.equal(await attributeForSelector(page, "#frame", "src"), null)
   assert.equal(await propertyForSelector(page, "#frame", "src"), null)
 })
 

@@ -27,7 +27,7 @@ export class Navigator {
   proposeVisit(location: URL, options: Partial<VisitOptions> = {}) {
     if (this.delegate.allowsVisitingLocationWithAction(location, options.action)) {
       if (this.delegate.locationIsVisitable(location, this.view.snapshot.rootLocation)) {
-        return this.delegate.visitProposedToLocation(location, options)
+        this.delegate.visitProposedToLocation(location, options)
       } else {
         window.location.href = location.toString()
       }

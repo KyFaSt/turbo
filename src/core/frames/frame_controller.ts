@@ -31,6 +31,7 @@ import { isAction, Action } from "../types"
 import { VisitOptions } from "../drive/visit"
 import { TurboBeforeFrameRenderEvent } from "../session"
 import { StreamMessage } from "../streams/stream_message"
+import { PageSnapshot } from "../drive/page_snapshot"
 
 type VisitFallback = (location: Response | Locatable, options: Partial<VisitOptions>) => Promise<void>
 export type TurboFrameMissingEvent = CustomEvent<{ response: Response; visit: VisitFallback }>
@@ -64,6 +65,7 @@ export class FrameController
   readonly restorationIdentifier: string
   private previousFrameElement?: FrameElement
   private currentNavigationElement?: Element
+  pageSnapshot?: PageSnapshot
 
   constructor(element: FrameElement) {
     this.element = element
@@ -115,6 +117,16 @@ export class FrameController
     if (this.loadingStyle == FrameLoadingStyle.eager || this.hasBeenLoaded) {
       this.loadSourceURL()
     }
+  }
+
+  sourceURLReloaded() {
+    const { src } = this.element
+    this.ignoringChangesToAttribute("complete", () => {
+      this.element.removeAttribute("complete")
+    })
+    this.element.src = null
+    this.element.src = src
+    return this.element.loaded
   }
 
   completeChanged() {
@@ -356,6 +368,7 @@ export class FrameController
 
   private navigateFrame(element: Element, url: string, submitter?: HTMLElement) {
     const frame = this.findFrameElement(element, submitter)
+    this.pageSnapshot = PageSnapshot.fromElement(frame).clone()
 
     this.proposeVisitIfNavigatedWithAction(frame, element, submitter)
 
@@ -382,6 +395,7 @@ export class FrameController
             willRender: false,
             updateHistory: false,
             restorationIdentifier: this.restorationIdentifier,
+            snapshot: this.pageSnapshot,
           }
 
           if (this.action) options.action = this.action
