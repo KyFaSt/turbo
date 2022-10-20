@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Turbo Accessibility Showcase</title>
+    <script src="/dist/turbo.es2017-umd.js" data-turbo-track="reload"></script>
+    <script src="/src/tests/fixtures/test.js"></script>
+    <script type="importmap" nonce="123">
+      { "imports": { "turbo": "/dist/turbo.es2017-umd.js?123"} }
+    </script>
+
+    <script>
+      function disableTurbo() {
+        document.querySelectorAll('[data-turbo]').forEach((el) => el.setAttribute('data-turbo', false))
+
+        document.querySelector('#disable-turbo').disabled = true
+        document.querySelector('#enable-turbo').disabled = false
+      }
+
+      function enableTurbo() {
+        document.querySelectorAll('[data-turbo]').forEach((el) => el.setAttribute('data-turbo', true))
+
+        document.querySelector('#disable-turbo').disabled = false
+        document.querySelector('#enable-turbo').disabled = true
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Accessibility</h1>
+
+    <button id="disable-turbo" onclick="disableTurbo()">Disable turbo</button>
+    <button id="enable-turbo" onclick="enableTurbo()" disabled>Enable turbo</button>
+
+    <h2>Turbo Drive</h2>
+
+    <p><a id="drive-link" data-turbo="true" href="/src/tests/fixtures/accessibility/navigation.html">Drive link</a></p>
+
+    <h2>Turbo Frame</h2>
+
+    <p>Basic frame</p>
+    <turbo-frame id="tab-frame">
+      <div>
+        <a id="tab-1" data-turbo="true" href="/src/tests/fixtures/accessibility.html">Tab 1</a>
+        <a id="tab-2" data-turbo="true" href="/src/tests/fixtures/accessibility/two.html">Tab 2</a>
+        <a id="tab-3" data-turbo="true" href="/src/tests/fixtures/accessibility/three.html">Tab 3</a>
+      </div>
+
+      <div id="tab-content">One</div>
+    </turbo-frame>
+
+    <p>Promoted frame</p>
+    <turbo-frame id="tab-promoted-frame" data-turbo-action="advance">
+      <div>
+        <a id="tab-promoted-1" data-turbo="true" href="/src/tests/fixtures/accessibility.html">Tab 1</a>
+        <a id="tab-promoted-2" data-turbo="true" href="/src/tests/fixtures/accessibility/two.html">Tab 2</a>
+        <a id="tab-promoted-3" data-turbo="true" href="/src/tests/fixtures/accessibility/three.html">Tab 3</a>
+      </div>
+
+      <div id="tab-promoted-content">One</div>
+    </turbo-frame>
+
+    <p>Target _top frame</p>
+    <turbo-frame id="tab-top-frame" target="_top">
+      <div>
+        <a id="tab-top-1" data-turbo="true" href="/src/tests/fixtures/accessibility.html">Tab 1</a>
+        <a id="tab-top-2" data-turbo="true" href="/src/tests/fixtures/accessibility/two.html">Tab 2</a>
+        <a id="tab-top-3" data-turbo="true" href="/src/tests/fixtures/accessibility/three.html">Tab 3</a>
+      </div>
+
+      <div id="tab-top-content">One</div>
+    </turbo-frame>
+  </body>
+</html>
