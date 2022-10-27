@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html id="one">
+  <head>
+    <meta charset="utf-8">
+    <title>One</title>
+    <script src="/dist/turbo.es2017-umd.js"></script>
+
+    <script>
+      document.addEventListener('turbo:click', (event) => {
+        event.detail.render = (currentElement, newElement) => {
+          const currentTurboBody = currentElement.querySelector('[data-turbo-body]')
+          const newTurboBody = newElement.querySelector('[data-turbo-body]')
+
+          currentTurboBody.replaceWith(newTurboBody)
+        }
+      })
+    </script>
+  </head>
+  <body>
+    <h1>Two</h1>
+
+    <div data-turbo-body>
+      <p>The content looks like this in page Two, notice that the header didn't change, but it will if you refresh</p>
+
+      <a href="/src/tests/fixtures/custom_render/one.html">One</a>
+    </div>
+  </body>
+</html>

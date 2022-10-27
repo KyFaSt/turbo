@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html id="one">
+  <head>
+    <meta charset="utf-8">
+    <title>One</title>
+    <script src="/dist/turbo.es2017-umd.js"></script>
+
+    <script>
+      document.addEventListener('turbo:before-render', (event) => {
+        event.detail.render = (currentElement, newElement) => {
+          const currentTurboBody = currentElement.querySelector('[data-turbo-body]')
+          const newTurboBody = newElement.querySelector('[data-turbo-body]')
+
+          currentTurboBody.replaceWith(newTurboBody)
+        }
+      })
+    </script>
+  </head>
+  <body>
+    <h1>One</h1>
+
+    <div data-turbo-body>
+      <p>This is the content that will be replaces when turbo Driving.</p>
+
+      <a href="/src/tests/fixtures/custom_render/two.html">Two</a>
+    </div>
+  </body>
+</html>
