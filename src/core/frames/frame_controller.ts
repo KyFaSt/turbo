@@ -32,6 +32,7 @@ import { VisitOptions } from "../drive/visit"
 import { TurboBeforeFrameRenderEvent, TurboFrameClickEvent } from "../session"
 import { StreamMessage } from "../streams/stream_message"
 import { PageSnapshot } from "../drive/page_snapshot"
+import { CSPTrustedTypesPolicy } from "../../trusted_types"
 
 type VisitFallback = (location: Response | Locatable, options: Partial<VisitOptions>) => Promise<void>
 export type TurboFrameMissingEvent = CustomEvent<{ response: Response; visit: VisitFallback }>
@@ -160,7 +161,14 @@ export class FrameController
     try {
       const html = await fetchResponse.responseHTML
       if (html) {
-        const { body } = parseHTMLDocument(html)
+        let body
+        if (CSPTrustedTypesPolicy == null) {
+          body = parseHTMLDocument(html)
+        } else {
+          const safeHTML = CSPTrustedTypesPolicy.createHTML(html)
+          body = parseHTMLDocument(safeHTML as string)
+        }
+
         const newFrameElement = await this.extractForeignFrameElement(body)
 
         if (newFrameElement) {

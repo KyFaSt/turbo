@@ -2,10 +2,16 @@ import { parseHTMLDocument } from "../../util"
 import { Snapshot } from "../snapshot"
 import { expandURL } from "../url"
 import { HeadSnapshot } from "./head_snapshot"
+import { CSPTrustedTypesPolicy } from "../../trusted_types"
 
 export class PageSnapshot extends Snapshot<HTMLBodyElement> {
   static fromHTMLString(html = "") {
-    return this.fromDocument(parseHTMLDocument(html))
+    if (CSPTrustedTypesPolicy == null) {
+      return this.fromDocument(parseHTMLDocument(html))
+    } else {
+      const safeHTML = CSPTrustedTypesPolicy.createHTML(html)
+      return this.fromDocument(parseHTMLDocument(safeHTML as string))
+    }
   }
 
   static fromElement(element: Element) {
