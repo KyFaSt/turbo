@@ -9,8 +9,8 @@ export class PageSnapshot extends Snapshot<HTMLBodyElement> {
     if (CSPTrustedTypesPolicy == null) {
       return this.fromDocument(parseHTMLDocument(html))
     } else {
-      const safeHTML = CSPTrustedTypesPolicy.createHTML(html)
-      return this.fromDocument(parseHTMLDocument(safeHTML as string))
+      const trustedHTML = CSPTrustedTypesPolicy.createHTML(html)
+      return this.fromDocument(parseHTMLDocument(trustedHTML as string))
     }
   }
 

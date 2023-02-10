@@ -165,8 +165,8 @@ export class FrameController
         if (CSPTrustedTypesPolicy == null) {
           body = parseHTMLDocument(html)
         } else {
-          const safeHTML = CSPTrustedTypesPolicy.createHTML(html)
-          body = parseHTMLDocument(safeHTML as string)
+          const trustedHTML = CSPTrustedTypesPolicy.createHTML(html)
+          body = parseHTMLDocument(trustedHTML as string)
         }
 
         const newFrameElement = await this.extractForeignFrameElement(body)
