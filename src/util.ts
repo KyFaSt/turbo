@@ -1,4 +1,5 @@
 import { Action, isAction } from "./core/types"
+import { CSPTrustedTypesPolicy } from "./trusted_types"
 
 export type DispatchOptions<T extends CustomEvent> = {
   target: EventTarget
@@ -17,7 +18,13 @@ export function activateScriptElement(element: HTMLScriptElement) {
     }
     createdScriptElement.textContent = element.textContent
     createdScriptElement.async = false
-    copyElementAttributes(createdScriptElement, element)
+    if (CSPTrustedTypesPolicy == null) {
+      copyElementAttributes(createdScriptElement, element)
+    } else {
+      const trustedElementSrc = CSPTrustedTypesPolicy.createScriptURL(element.getAttribute("src") as string)
+      element.setAttribute("src", trustedElementSrc as string)
+      copyElementAttributes(createdScriptElement, element)
+    }
     return createdScriptElement
   }
 }
