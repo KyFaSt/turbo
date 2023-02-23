@@ -96,7 +96,7 @@ export class Navigator {
         const visitOptions = {
           action,
           shouldCacheSnapshot,
-          response: { statusCode, responseHTML, redirected, response },
+          response: { statusCode, redirected, response },
         }
         this.proposeVisit(fetchResponse.location, visitOptions)
       }

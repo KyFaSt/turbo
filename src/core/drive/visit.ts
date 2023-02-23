@@ -67,7 +67,6 @@ const defaultOptions: VisitOptions = {
 export type VisitResponse = {
   statusCode: number
   redirected: boolean
-  responseHTML?: string
   response?: Response
 }
 
@@ -359,7 +358,7 @@ export class Visit implements FetchRequestDelegate {
       })
     } else {
       this.redirectedToLocation = fetchResponse.redirected ? fetchResponse.location : undefined
-      this.recordResponse({ statusCode: statusCode, responseHTML, redirected, response })
+      this.recordResponse({ statusCode: statusCode, redirected, response })
     }
   }
 
@@ -373,7 +372,7 @@ export class Visit implements FetchRequestDelegate {
         response,
       })
     } else {
-      this.recordResponse({ statusCode: statusCode, responseHTML, redirected, response })
+      this.recordResponse({ statusCode: statusCode, redirected, response })
     }
   }
 
