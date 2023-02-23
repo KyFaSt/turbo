@@ -1,17 +1,26 @@
+import { CSPTrustedTypesPolicy, emptyHTML } from "../../trusted_types"
 import { parseHTMLDocument } from "../../util"
 import { Snapshot } from "../snapshot"
 import { expandURL } from "../url"
 import { HeadSnapshot } from "./head_snapshot"
-import { CSPTrustedTypesPolicy } from "../../trusted_types"
 
 export class PageSnapshot extends Snapshot<HTMLBodyElement> {
-  static fromHTMLString(html = "") {
-    if (CSPTrustedTypesPolicy == null) {
-      return this.fromDocument(parseHTMLDocument(html))
-    } else {
-      const trustedHTML = CSPTrustedTypesPolicy.createHTML(html)
-      return this.fromDocument(parseHTMLDocument(trustedHTML as string))
+
+  static async fromResponse(response?: Response): Promise<PageSnapshot> {
+    if (!response) {
+      return this.fromHTMLString()
     }
+    const responseText = await response.text()
+    if (CSPTrustedTypesPolicy == null) {
+      return this.fromHTMLString(responseText)
+    } else {
+      const trustedHTML = CSPTrustedTypesPolicy.createHTML(responseText, response)
+      return this.fromHTMLString(trustedHTML as string)
+    }
+  }
+
+  static fromHTMLString(html = emptyHTML) {
+    return this.fromDocument(parseHTMLDocument(html))
   }
 
   static fromElement(element: Element) {

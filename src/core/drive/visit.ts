@@ -68,6 +68,7 @@ export type VisitResponse = {
   statusCode: number
   redirected: boolean
   responseHTML?: string
+  response?: Response
 }
 
 export enum SystemStatusCode {
@@ -253,17 +254,17 @@ export class Visit implements FetchRequestDelegate {
 
   loadResponse() {
     if (this.response) {
-      const { statusCode, responseHTML } = this.response
+      const { statusCode, response } = this.response
       this.render(async () => {
         if (this.shouldCacheSnapshot) this.cacheSnapshot()
         if (this.view.renderPromise) await this.view.renderPromise
-        if (isSuccessful(statusCode) && responseHTML != null) {
-          await this.view.renderPage(PageSnapshot.fromHTMLString(responseHTML), false, this.willRender, this)
+        if (isSuccessful(statusCode) && response != null) {
+          await this.view.renderPage(await PageSnapshot.fromResponse(response), false, this.willRender, this)
           this.performScroll()
           this.adapter.visitRendered(this)
           this.complete()
         } else {
-          await this.view.renderError(PageSnapshot.fromHTMLString(responseHTML), this)
+          await this.view.renderError(await PageSnapshot.fromResponse(response), this)
           this.adapter.visitRendered(this)
           this.fail()
         }
@@ -345,32 +346,34 @@ export class Visit implements FetchRequestDelegate {
     this.startRequest()
   }
 
-  requestPreventedHandlingResponse(_request: FetchRequest, _response: FetchResponse) {}
+  requestPreventedHandlingResponse(_request: FetchRequest, _response: FetchResponse) { }
 
-  async requestSucceededWithResponse(request: FetchRequest, response: FetchResponse) {
-    const responseHTML = await response.responseHTML
-    const { redirected, statusCode } = response
+  async requestSucceededWithResponse(request: FetchRequest, fetchResponse: FetchResponse) {
+    const responseHTML = await fetchResponse.responseHTML
+    const { redirected, statusCode, response } = fetchResponse
     if (responseHTML == undefined) {
       this.recordResponse({
         statusCode: SystemStatusCode.contentTypeMismatch,
         redirected,
+        response,
       })
     } else {
-      this.redirectedToLocation = response.redirected ? response.location : undefined
-      this.recordResponse({ statusCode: statusCode, responseHTML, redirected })
+      this.redirectedToLocation = fetchResponse.redirected ? fetchResponse.location : undefined
+      this.recordResponse({ statusCode: statusCode, responseHTML, redirected, response })
     }
   }
 
-  async requestFailedWithResponse(request: FetchRequest, response: FetchResponse) {
-    const responseHTML = await response.responseHTML
-    const { redirected, statusCode } = response
+  async requestFailedWithResponse(request: FetchRequest, fetchResponse: FetchResponse) {
+    const responseHTML = await fetchResponse.responseHTML
+    const { redirected, statusCode, response } = fetchResponse
     if (responseHTML == undefined) {
       this.recordResponse({
         statusCode: SystemStatusCode.contentTypeMismatch,
         redirected,
+        response,
       })
     } else {
-      this.recordResponse({ statusCode: statusCode, responseHTML, redirected })
+      this.recordResponse({ statusCode: statusCode, responseHTML, redirected, response })
     }
   }
 

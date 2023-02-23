@@ -11,9 +11,13 @@ interface CSPTrustedScriptUrlToStringable {
 }
 
 interface CSPTrustedTypesPolicy {
-  createHTML: (s: string) => CSPTrustedHTMLToStringable
+  createHTML: (s: string, r: Response) => CSPTrustedHTMLToStringable
   createScript: (s: string) => CSPTrustedScriptToStringable
   createScriptURL: (s: string) => CSPTrustedScriptUrlToStringable
+}
+
+interface TrustedTypesPolicyInterface {
+  emptyHTML: string
 }
 
 let CSPTrustedTypesPolicy: CSPTrustedTypesPolicy | null = null
@@ -21,5 +25,12 @@ let CSPTrustedTypesPolicy: CSPTrustedTypesPolicy | null = null
 export function setCSPTrustedTypesPolicy(policy: CSPTrustedTypesPolicy) {
   CSPTrustedTypesPolicy = policy
 }
+
+type GlobalThis = typeof globalThis
+interface TrustedTypesGlobalThis extends GlobalThis {
+  trustedTypes?: TrustedTypesPolicyInterface
+}
+
+export const emptyHTML = (globalThis as TrustedTypesGlobalThis).trustedTypes?.emptyHTML ?? ""
 
 export { CSPTrustedTypesPolicy }
