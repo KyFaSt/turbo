@@ -39,14 +39,14 @@ export type TurboFrameMissingEvent = CustomEvent<{ response: Response; visit: Vi
 
 export class FrameController
   implements
-  AppearanceObserverDelegate<FrameElement>,
-  FetchRequestDelegate,
-  FormSubmitObserverDelegate,
-  FormSubmissionDelegate,
-  FrameElementDelegate,
-  FormLinkClickObserverDelegate,
-  LinkInterceptorDelegate,
-  ViewDelegate<FrameElement, Snapshot<FrameElement>>
+    AppearanceObserverDelegate<FrameElement>,
+    FetchRequestDelegate,
+    FormSubmitObserverDelegate,
+    FormSubmissionDelegate,
+    FrameElementDelegate,
+    FormLinkClickObserverDelegate,
+    LinkInterceptorDelegate,
+    ViewDelegate<FrameElement, Snapshot<FrameElement>>
 {
   readonly element: FrameElement
   readonly view: FrameView
@@ -55,7 +55,7 @@ export class FrameController
   readonly linkInterceptor: LinkInterceptor
   readonly formSubmitObserver: FormSubmitObserver
   formSubmission?: FormSubmission
-  fetchResponseLoaded = (_fetchResponse: FetchResponse) => { }
+  fetchResponseLoaded = (_fetchResponse: FetchResponse) => {}
   private currentFetchRequest: FetchRequest | null = null
   private resolveVisitPromise = () => {}
   private connected = false
@@ -336,7 +336,7 @@ export class FrameController
     return !defaultPrevented
   }
 
-  viewRenderedSnapshot(_snapshot: Snapshot, _isPreview: boolean) { }
+  viewRenderedSnapshot(_snapshot: Snapshot, _isPreview: boolean) {}
 
   preloadOnLoadLinksForView(element: Element) {
     session.preloadOnLoadLinksForView(element)

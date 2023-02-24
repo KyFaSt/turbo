@@ -5,7 +5,6 @@ import { expandURL } from "../url"
 import { HeadSnapshot } from "./head_snapshot"
 
 export class PageSnapshot extends Snapshot<HTMLBodyElement> {
-
   static async fromResponse(response?: Response): Promise<PageSnapshot> {
     if (!response) {
       return this.fromHTMLString()
