@@ -6,6 +6,7 @@ import {
   nextEventOnTarget,
   pathname,
   scrollToSelector,
+  propertyForSelector,
 } from "../helpers/page"
 import { assert } from "chai"
 
@@ -138,4 +139,18 @@ test("test canceling frame requests don't mutate the history", async ({ page }) 
 
   assert.equal(await page.textContent("#tab-content"), "Two")
   assert.equal(pathname((await page.getAttribute("#tab-frame", "src")) || ""), "/src/tests/fixtures/tabs/two.html")
+})
+
+test("test promoted frame navigation loads images after rendering", async ({ page }) => {
+  await page.goto("/src/tests/fixtures/tabs.html")
+
+  await page.click("#tab-with-image")
+  await nextEventNamed(page, "turbo:frame-render")
+
+  assert.equal(await page.textContent("#tab-content"), "With image")
+
+  assert.equal(
+    await propertyForSelector(page, "#tab-image", "currentSrc"),
+    "http://localhost:9000/src/tests/fixtures/images/turbo.png"
+  )
 })

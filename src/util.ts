@@ -23,6 +23,16 @@ export function activateScriptElement(element: HTMLScriptElement) {
   }
 }
 
+export function activateImageElement(element: HTMLImageElement) {
+  if (element.getAttribute("data-turbo-eval") == "false") {
+    return element
+  } else {
+    const createdImageElement = document.createElement("img")
+    copyElementAttributes(createdImageElement, element)
+    return createdImageElement
+  }
+}
+
 function copyScriptAttributes(destinationElement: HTMLScriptElement, sourceElement: HTMLScriptElement) {
   for (const { name, value } of sourceElement.attributes) {
     if (name === "src" && CSPTrustedTypesPolicy !== null) {
