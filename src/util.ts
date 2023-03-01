@@ -33,6 +33,12 @@ export function activateImageElement(element: HTMLImageElement) {
   }
 }
 
+function copyElementAttributes(destinationElement: Element, sourceElement: Element) {
+  for (const { name, value } of sourceElement.attributes) {
+    destinationElement.setAttribute(name, value)
+  }
+}
+
 function copyScriptAttributes(destinationElement: HTMLScriptElement, sourceElement: HTMLScriptElement) {
   for (const { name, value } of sourceElement.attributes) {
     if (name === "src" && CSPTrustedTypesPolicy !== null) {
