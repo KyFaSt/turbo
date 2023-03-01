@@ -26,8 +26,7 @@ RUN wget -qO - $CHROMIUM_DEB_URL > /tmp/chrome_linux64.deb \
     && unzip -qq /tmp/chromedriver_linux64.zip -d $CHROMEDRIVER_DIR \
     && chmod +x $CHROMEDRIVER_BIN \
     && ln -s "$CHROMEDRIVER_BIN" /usr/bin/ \
-    && rm -rf /tmp/chrome* \
-    && export CHROMEVER=$CHROME_VERSION
+    && rm -rf /tmp/chrome*
 
 # [Optional] Uncomment if you want to install an additional version of node using nvm
 # ARG EXTRA_NODE_VERSION=10
