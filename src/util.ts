@@ -18,20 +18,19 @@ export function activateScriptElement(element: HTMLScriptElement) {
     }
     createdScriptElement.textContent = element.textContent
     createdScriptElement.async = false
-    if (CSPTrustedTypesPolicy == null) {
-      copyElementAttributes(createdScriptElement, element)
-    } else {
-      const trustedElementSrc = CSPTrustedTypesPolicy.createScriptURL(element.getAttribute("src") as string)
-      element.setAttribute("src", trustedElementSrc as string)
-      copyElementAttributes(createdScriptElement, element)
-    }
+    copyScriptAttributes(createdScriptElement, element)
     return createdScriptElement
   }
 }
 
-function copyElementAttributes(destinationElement: Element, sourceElement: Element) {
+function copyScriptAttributes(destinationElement: HTMLScriptElement, sourceElement: HTMLScriptElement) {
   for (const { name, value } of sourceElement.attributes) {
-    destinationElement.setAttribute(name, value)
+    if (name === "src" && CSPTrustedTypesPolicy !== null) {
+      const trustedElementSrc = CSPTrustedTypesPolicy.createScriptURL(value as string)
+      destinationElement.setAttribute(name, trustedElementSrc as string)
+    } else {
+      destinationElement.setAttribute(name, value)
+    }
   }
 }
 
